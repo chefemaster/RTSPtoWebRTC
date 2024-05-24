@@ -1,0 +1,10 @@
+services:
+  rtsp_web:
+    container_name: rtsp_web
+    restart: always
+    image: rtsp_web:1.0
+    ports:
+      - 8084:8084
+    environment:
+      - MONGO_CONNECTION=mongodb://localhost:27017
+      - MONGO_DATABASE=test_db
