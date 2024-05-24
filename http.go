@@ -1,7 +1,11 @@
 package main
 
 import (
+	"encoding/base32"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"github.com/xlzd/gotp"
 	"log"
 	"net/http"
 	"os"
@@ -18,11 +22,17 @@ type JCodec struct {
 	Type string
 }
 
+type AuthST struct {
+	Id    string `json:"_id"`
+	Token string `json:"token"`
+}
+
 func serveHTTP() {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.Default()
 	router.Use(CORSMiddleware())
+	router.Use(AuthMiddleware())
 
 	if _, err := os.Stat("./web"); !os.IsNotExist(err) {
 		router.LoadHTMLGlob("web/templates/*")
@@ -40,7 +50,7 @@ func serveHTTP() {
 	}
 }
 
-//HTTPAPIServerIndex  index
+// HTTPAPIServerIndex  index
 func HTTPAPIServerIndex(c *gin.Context) {
 	_, all := Config.list()
 	if len(all) > 0 {
@@ -55,7 +65,7 @@ func HTTPAPIServerIndex(c *gin.Context) {
 	}
 }
 
-//HTTPAPIServerStreamPlayer stream player
+// HTTPAPIServerStreamPlayer stream player
 func HTTPAPIServerStreamPlayer(c *gin.Context) {
 	_, all := Config.list()
 	sort.Strings(all)
@@ -67,7 +77,7 @@ func HTTPAPIServerStreamPlayer(c *gin.Context) {
 	})
 }
 
-//HTTPAPIServerStreamCodec stream codec
+// HTTPAPIServerStreamCodec stream codec
 func HTTPAPIServerStreamCodec(c *gin.Context) {
 	if Config.ext(c.Param("uuid")) {
 		Config.RunIFNotRun(c.Param("uuid"))
@@ -98,7 +108,7 @@ func HTTPAPIServerStreamCodec(c *gin.Context) {
 	}
 }
 
-//HTTPAPIServerStreamWebRTC stream video over WebRTC
+// HTTPAPIServerStreamWebRTC stream video over WebRTC
 func HTTPAPIServerStreamWebRTC(c *gin.Context) {
 	if !Config.ext(c.PostForm("suuid")) {
 		log.Println("Stream Not Found")
@@ -114,7 +124,15 @@ func HTTPAPIServerStreamWebRTC(c *gin.Context) {
 	if len(codecs) == 1 && codecs[0].Type().IsAudio() {
 		AudioOnly = true
 	}
-	muxerWebRTC := webrtc.NewMuxer(webrtc.Options{ICEServers: Config.GetICEServers(), ICEUsername: Config.GetICEUsername(), ICECredential: Config.GetICECredential(), PortMin: Config.GetWebRTCPortMin(), PortMax: Config.GetWebRTCPortMax()})
+	muxerWebRTC := webrtc.NewMuxer(
+		webrtc.Options{
+			ICEServers:    Config.GetICEServers(),
+			ICEUsername:   Config.GetICEUsername(),
+			ICECredential: Config.GetICECredential(),
+			PortMin:       Config.GetWebRTCPortMin(),
+			PortMax:       Config.GetWebRTCPortMax(),
+		},
+	)
 	answer, err := muxerWebRTC.WriteHeader(codecs, c.PostForm("data"))
 	if err != nil {
 		log.Println("WriteHeader", err)
@@ -164,6 +182,35 @@ func CORSMiddleware() gin.HandlerFunc {
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.Request.Header.Get("Authorization")
+		decode, errBase64 := base64.StdEncoding.DecodeString(token)
+		if errBase64 != nil {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		var auth AuthST
+		err := json.Unmarshal(decode, &auth)
+		if err != nil {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		secret := base32.StdEncoding.EncodeToString([]byte(auth.Id + "Sh0m&rc0ntr0l3"))
+		totp := gotp.NewTOTP(string(secret), 10, 60, nil)
+		fmt.Println("Current OTP is", totp.Now())
+
+		if totp.Verify(auth.Token, time.Now().Unix()) == false {
+			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
 
