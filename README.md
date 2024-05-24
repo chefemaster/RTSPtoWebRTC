@@ -8,8 +8,6 @@ RTSP Stream to WebBrowser over WebRTC based on Pion (full native! not using ffmp
 if you need RTSPtoWSMP4f use https://github.com/deepch/RTSPtoWSMP4f
 
 
-![RTSPtoWebRTC image](doc/demo4.png)
-
 ### Download Source
 
 1. Download source
@@ -34,25 +32,17 @@ if you need RTSPtoWSMP4f use https://github.com/deepch/RTSPtoWSMP4f
 ### Edit file config.json
 
 format:
-
-```bash
+```json
 {
   "server": {
-    "http_port": ":8083"
+    "http_port": ":8084",
+     "ice_servers": ["stun:stun.l.google.com:19302"]
   },
-  "streams": {
-    "demo1": {
-      "on_demand" : false,
-      "url": "rtsp://170.93.143.139/rtplive/470011e600ef003a004ee33696235daa"
-    },
-    "demo2": {
-      "on_demand" : true,
-      "url": "rtsp://admin:admin123@10.128.18.224/mpeg4"
-    },
-    "demo3": {
-      "on_demand" : false,
-      "url": "rtsp://170.93.143.139/rtplive/470011e600ef003a004ee33696235daa"
-    }
+  "stream": {
+    "on_demand": true,
+    "disable_audio": true,
+    "url": "rtsp://%s:%s@%s:554/Streaming/channels/102/?transportmode=multicast",
+    "debug": false
   }
 }
 ```
@@ -66,6 +56,17 @@ Use option ``` "on_demand": false ``` otherwise you will get choppy jerky stream
 Video Codecs Supported: H264
 
 Audio Codecs Supported: pcm alaw and pcm mulaw 
+
+## Docker
+
+### Build Docker Image multiarch
+   ```bash
+   $ docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -f Dockerfile -t demo:latest .
+   ```
+### Save file image
+   ```bash
+   $ docker save -o demo.tar demo:latest
+   ```
 
 ## Team
 
@@ -85,5 +86,3 @@ Examples of working with video on golang
 - [RTSPtoImage](https://github.com/deepch/RTSPtoImage)
 - [RTSPtoHLS](https://github.com/deepch/RTSPtoHLS)
 - [RTSPtoHLSLL](https://github.com/deepch/RTSPtoHLSLL)
-
-[![paypal.me/AndreySemochkin](https://ionicabizau.github.io/badges/paypal.svg)](https://www.paypal.me/AndreySemochkin) - You can make one-time donations via PayPal. I'll probably buy a ~~coffee~~ tea. :tea:
