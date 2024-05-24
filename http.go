@@ -32,7 +32,7 @@ func serveHTTP() {
 
 	router := gin.Default()
 	router.Use(CORSMiddleware())
-	router.Use(AuthMiddleware())
+	//router.Use(AuthMiddleware())
 
 	if _, err := os.Stat("./web"); !os.IsNotExist(err) {
 		router.LoadHTMLGlob("web/templates/*")
@@ -42,6 +42,8 @@ func serveHTTP() {
 	router.POST("/stream/receiver/:uuid", HTTPAPIServerStreamWebRTC)
 	router.GET("/stream/codec/:uuid", HTTPAPIServerStreamCodec)
 	router.POST("/stream", HTTPAPIServerStreamWebRTC2)
+	router.GET("/reload", HTTPAPIServerStreamReload)
+	router.GET("/heathcheck", HTTPAPIServerStreamHealthCheck)
 
 	router.StaticFS("/static", http.Dir("web/static"))
 	err := router.Run(Config.Server.HTTPPort)
@@ -146,7 +148,12 @@ func HTTPAPIServerStreamWebRTC(c *gin.Context) {
 	go func() {
 		cid, ch := Config.clAd(c.PostForm("suuid"))
 		defer Config.clDe(c.PostForm("suuid"), cid)
-		defer muxerWebRTC.Close()
+		defer func(muxerWebRTC *webrtc.Muxer) {
+			err := muxerWebRTC.Close()
+			if err != nil {
+
+			}
+		}(muxerWebRTC)
 		var videoStart bool
 		noVideo := time.NewTimer(10 * time.Second)
 		for {
@@ -206,7 +213,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 
 		secret := base32.StdEncoding.EncodeToString([]byte(auth.Id + "Sh0m&rc0ntr0l3"))
-		totp := gotp.NewTOTP(string(secret), 10, 60, nil)
+		totp := gotp.NewTOTP(secret, 10, 60, nil)
 		fmt.Println("Current OTP is", totp.Now())
 
 		if totp.Verify(auth.Token, time.Now().Unix()) == false {
@@ -258,7 +265,7 @@ func HTTPAPIServerStreamWebRTC2(c *gin.Context) {
 	answer, err := muxerWebRTC.WriteHeader(codecs, sdp64)
 	if err != nil {
 		log.Println("Muxer WriteHeader", err)
-		c.JSON(500, ResponseError{Error: err.Error()})
+		c.JSON(http.StatusInternalServerError, ResponseError{Error: err.Error()})
 		return
 	}
 
@@ -281,14 +288,19 @@ func HTTPAPIServerStreamWebRTC2(c *gin.Context) {
 		}
 	}
 
-	c.JSON(200, response)
+	c.JSON(http.StatusOK, response)
 
 	AudioOnly := len(codecs) == 1 && codecs[0].Type().IsAudio()
 
 	go func() {
 		cid, ch := Config.clAd(url)
 		defer Config.clDe(url, cid)
-		defer muxerWebRTC.Close()
+		defer func(muxerWebRTC *webrtc.Muxer) {
+			err := muxerWebRTC.Close()
+			if err != nil {
+
+			}
+		}(muxerWebRTC)
 		var videoStart bool
 		noVideo := time.NewTimer(10 * time.Second)
 		for {
@@ -312,4 +324,24 @@ func HTTPAPIServerStreamWebRTC2(c *gin.Context) {
 			}
 		}
 	}()
+}
+
+func HTTPAPIServerStreamReload(c *gin.Context) {
+	err := Config.reload()
+
+	if err != nil {
+		log.Println("Reload config", err)
+		c.JSON(http.StatusInternalServerError, ResponseError{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"status": "ok",
+	})
+}
+
+func HTTPAPIServerStreamHealthCheck(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"status": "ok",
+	})
 }

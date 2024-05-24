@@ -37,12 +37,6 @@ format:
   "server": {
     "http_port": ":8084",
      "ice_servers": ["stun:stun.l.google.com:19302"]
-  },
-  "stream": {
-    "on_demand": true,
-    "disable_audio": true,
-    "url": "rtsp://%s:%s@%s:554/Streaming/channels/102/?transportmode=multicast",
-    "debug": false
   }
 }
 ```

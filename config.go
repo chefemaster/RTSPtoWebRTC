@@ -8,6 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"log"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -19,11 +20,11 @@ var Config = loadConfig()
 
 // ConfigST struct
 type ConfigST struct {
-	mutex        sync.RWMutex
-	Server       ServerST  `json:"server"`
-	StreamConfig StreamCfg `json:"stream"`
-	Streams      map[string]StreamST
-	LastError    error
+	mutex     sync.RWMutex
+	Server    ServerST `json:"server"`
+	Streams   map[string]StreamST
+	Env       *Env
+	LastError error
 }
 
 // ServerST struct
@@ -36,22 +37,14 @@ type ServerST struct {
 	WebRTCPortMax uint16   `json:"webrtc_port_max"`
 }
 
-// StreamCfg struct
-type StreamCfg struct {
-	URL          string `json:"url"`
-	OnDemand     bool   `json:"on_demand"`
-	DisableAudio bool   `json:"disable_audio"`
-	Debug        bool   `json:"debug"`
-}
-
 // StreamST struct
 type StreamST struct {
-	URL          string `json:"url"`
-	Status       bool   `json:"status"`
-	OnDemand     bool   `json:"on_demand"`
-	DisableAudio bool   `json:"disable_audio"`
-	Debug        bool   `json:"debug"`
-	RunLock      bool   `json:"-"`
+	URL          string
+	Status       bool
+	OnDemand     bool
+	DisableAudio bool
+	Debug        bool
+	RunLock      bool
 	Codecs       []av.CodecData
 	Cl           map[string]viewer
 }
@@ -124,50 +117,22 @@ func (element *ConfigST) GetWebRTCPortMax() uint16 {
 
 func loadConfig() *ConfigST {
 	env := NewEnv()
-	server := NewServerMongo(env.Get("MONGO_DATABASE"))
-	defer func() {
-		err := server.Disconnect()
-		if err != nil {
-			log.Println(err)
-		}
-	}()
-
-	errSever := server.Connect(env.Get("MONGO_CONNECTION"))
 	var tmp ConfigST
+
 	data, err := os.ReadFile("config.json")
-	if err != nil && errSever != nil {
-		log.Fatalln("config.json and MongoDB are both present")
+	if err != nil {
+		log.Fatalln("config.jso is both present")
 	}
+
 	err = json.Unmarshal(data, &tmp)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	collection, errCollection := server.GetCollection(
-		"modulos_hikvision",
-		bson.M{"ativo": true},
-	)
-	if errCollection != nil {
-		log.Fatalln(errCollection)
-	}
+	tmp.Env = env
 
-	tmp.Streams = make(map[string]StreamST, len(collection))
-	for _, c := range collection {
-		index := c["codigo"].(string)
-		url := fmt.Sprintf(
-			tmp.StreamConfig.URL,
-			c["user"].(string),
-			c["password"].(string),
-			c["address"].(string),
-		)
-		stream := StreamST{
-			URL:          url,
-			OnDemand:     tmp.StreamConfig.OnDemand,
-			DisableAudio: tmp.StreamConfig.DisableAudio,
-			Debug:        tmp.StreamConfig.Debug,
-			RunLock:      false,
-			Cl:           make(map[string]viewer),
-		}
-		tmp.Streams[index] = stream
+	errLoad := tmp.reload()
+	if errLoad != nil {
+		log.Fatalln(errLoad)
 	}
 	return &tmp
 }
@@ -245,10 +210,67 @@ func (element *ConfigST) list() (string, []string) {
 	}
 	return fist, res
 }
+
 func (element *ConfigST) clDe(suuid, cuuid string) {
 	element.mutex.Lock()
 	defer element.mutex.Unlock()
 	delete(element.Streams[suuid].Cl, cuuid)
+}
+
+func (element *ConfigST) reload() error {
+	element.mutex.Lock()
+	server := NewServerMongo(
+		element.Env.Get("MONGO_DATABASE"),
+		element.Env.Get("MONGO_CONNECTION"),
+	)
+	defer func() {
+		element.mutex.Unlock()
+		err := server.Disconnect()
+		if err != nil {
+			log.Println(err)
+		}
+	}()
+
+	errSever := server.Connect()
+	if errSever != nil {
+		log.Println("Failed to connect to MongoDB")
+		return errSever
+	}
+
+	collection, errCollection := server.GetCollection(
+		"modulos_hikvision",
+		bson.M{"ativo": true},
+	)
+	if errCollection != nil {
+		log.Println(errCollection)
+		return errCollection
+	}
+
+	element.Streams = make(map[string]StreamST, len(collection))
+	rtspUrl := element.Env.Get("RTSP_URL")
+	onDemand, _ := strconv.ParseBool(element.Env.Get("RTSP_ON_DEMAND"))
+	disableAudio, _ := strconv.ParseBool(element.Env.Get("RTSP_DISABLE_AUDIO"))
+	debug, _ := strconv.ParseBool(element.Env.Get("RTSP_DEBUG"))
+
+	for _, c := range collection {
+		index := c["codigo"].(string)
+		url := fmt.Sprintf(
+			rtspUrl,
+			c["user"].(string),
+			c["password"].(string),
+			c["address"].(string),
+		)
+		stream := StreamST{
+			URL:          url,
+			OnDemand:     onDemand,
+			DisableAudio: disableAudio,
+			Debug:        debug,
+			RunLock:      false,
+			Cl:           make(map[string]viewer),
+		}
+		element.Streams[index] = stream
+	}
+	return nil
 }
 
 func pseudoUUID() (uuid string) {

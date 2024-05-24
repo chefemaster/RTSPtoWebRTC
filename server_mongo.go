@@ -8,18 +8,20 @@ import (
 )
 
 type ServerMongo struct {
-	database string
-	client   *mongo.Client
+	database         string
+	connectionString string
+	client           *mongo.Client
 }
 
-func NewServerMongo(database string) *ServerMongo {
+func NewServerMongo(database string, connection string) *ServerMongo {
 	return &ServerMongo{
-		database: database,
+		database:         database,
+		connectionString: connection,
 	}
 }
 
-func (s *ServerMongo) Connect(connectionString string) error {
-	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(connectionString))
+func (s *ServerMongo) Connect() error {
+	client, err := mongo.Connect(context.TODO(), options.Client().ApplyURI(s.connectionString))
 	if err != nil {
 		return err
 	}
