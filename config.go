@@ -3,30 +3,30 @@ package main
 import (
 	"crypto/rand"
 	"encoding/json"
-	"flag"
 	"fmt"
-	"io/ioutil"
+	"github.com/deepch/vdk/codec/h264parser"
+	"go.mongodb.org/mongo-driver/bson"
 	"log"
+	"os"
 	"sync"
 	"time"
-
-	"github.com/deepch/vdk/codec/h264parser"
 
 	"github.com/deepch/vdk/av"
 )
 
-//Config global
+// Config global
 var Config = loadConfig()
 
-//ConfigST struct
+// ConfigST struct
 type ConfigST struct {
-	mutex   sync.RWMutex
-	Server  ServerST            `json:"server"`
-	Streams map[string]StreamST `json:"streams"`
-	LastError error
+	mutex        sync.RWMutex
+	Server       ServerST  `json:"server"`
+	StreamConfig StreamCfg `json:"stream"`
+	Streams      map[string]StreamST
+	LastError    error
 }
 
-//ServerST struct
+// ServerST struct
 type ServerST struct {
 	HTTPPort      string   `json:"http_port"`
 	ICEServers    []string `json:"ice_servers"`
@@ -36,7 +36,15 @@ type ServerST struct {
 	WebRTCPortMax uint16   `json:"webrtc_port_max"`
 }
 
-//StreamST struct
+// StreamCfg struct
+type StreamCfg struct {
+	URL          string `json:"url"`
+	OnDemand     bool   `json:"on_demand"`
+	DisableAudio bool   `json:"disable_audio"`
+	Debug        bool   `json:"debug"`
+}
+
+// StreamST struct
 type StreamST struct {
 	URL          string `json:"url"`
 	Status       bool   `json:"status"`
@@ -115,32 +123,51 @@ func (element *ConfigST) GetWebRTCPortMax() uint16 {
 }
 
 func loadConfig() *ConfigST {
-	var tmp ConfigST
-	data, err := ioutil.ReadFile("config.json")
-	if err == nil {
-		err = json.Unmarshal(data, &tmp)
+	env := NewEnv()
+	server := NewServerMongo(env.Get("MONGO_DATABASE"))
+	defer func() {
+		err := server.Disconnect()
 		if err != nil {
-			log.Fatalln(err)
+			log.Println(err)
 		}
-		for i, v := range tmp.Streams {
-			v.Cl = make(map[string]viewer)
-			tmp.Streams[i] = v
-		}
-	} else {
-		addr := flag.String("listen", "8083", "HTTP host:port")
-		udpMin := flag.Int("udp_min", 0, "WebRTC UDP port min")
-		udpMax := flag.Int("udp_max", 0, "WebRTC UDP port max")
-		iceServer := flag.String("ice_server", "", "ICE Server")
-		flag.Parse()
+	}()
 
-		tmp.Server.HTTPPort = *addr
-		tmp.Server.WebRTCPortMin = uint16(*udpMin)
-		tmp.Server.WebRTCPortMax = uint16(*udpMax)
-		if len(*iceServer) > 0 {
-			tmp.Server.ICEServers = []string{*iceServer}
-		}
+	errSever := server.Connect(env.Get("MONGO_CONNECTION"))
+	var tmp ConfigST
+	data, err := os.ReadFile("config.json")
+	if err != nil && errSever != nil {
+		log.Fatalln("config.json and MongoDB are both present")
+	}
+	err = json.Unmarshal(data, &tmp)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	collection, errCollection := server.GetCollection(
+		"modulos_hikvision",
+		bson.M{"ativo": true},
+	)
+	if errCollection != nil {
+		log.Fatalln(errCollection)
+	}
 
-		tmp.Streams = make(map[string]StreamST)
+	tmp.Streams = make(map[string]StreamST, len(collection))
+	for _, c := range collection {
+		index := c["codigo"].(string)
+		url := fmt.Sprintf(
+			tmp.StreamConfig.URL,
+			c["user"].(string),
+			c["password"].(string),
+			c["address"].(string),
+		)
+		stream := StreamST{
+			URL:          url,
+			OnDemand:     tmp.StreamConfig.OnDemand,
+			DisableAudio: tmp.StreamConfig.DisableAudio,
+			Debug:        tmp.StreamConfig.Debug,
+			RunLock:      false,
+			Cl:           make(map[string]viewer),
+		}
+		tmp.Streams[index] = stream
 	}
 	return &tmp
 }
@@ -181,15 +208,10 @@ func (element *ConfigST) coGe(suuid string) []av.CodecData {
 		if tmp.Codecs != nil {
 			//TODO Delete test
 			for _, codec := range tmp.Codecs {
+				time.Sleep(50 * time.Millisecond)
 				if codec.Type() == av.H264 {
 					codecVideo := codec.(h264parser.CodecData)
-					if codecVideo.SPS() != nil && codecVideo.PPS() != nil && len(codecVideo.SPS()) > 0 && len(codecVideo.PPS()) > 0 {
-						//ok
-						//log.Println("Ok Video Ready to play")
-					} else {
-						//video codec not ok
-						log.Println("Bad Video Codec SPS or PPS Wait")
-						time.Sleep(50 * time.Millisecond)
+					if !(codecVideo.SPS() != nil && codecVideo.PPS() != nil && len(codecVideo.SPS()) > 0 && len(codecVideo.PPS()) > 0) {
 						continue
 					}
 				}
