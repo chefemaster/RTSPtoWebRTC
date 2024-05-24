@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -32,7 +31,7 @@ func serveHTTP() {
 
 	router := gin.Default()
 	router.Use(CORSMiddleware())
-	//router.Use(AuthMiddleware())
+	router.Use(AuthMiddleware())
 
 	if _, err := os.Stat("./web"); !os.IsNotExist(err) {
 		router.LoadHTMLGlob("web/templates/*")
@@ -212,7 +211,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		secret := base32.StdEncoding.EncodeToString([]byte(auth.Id + "Sh0m&rc0ntr0l3"))
+		secret := Config.generateKey(auth.Id)
 		totp := gotp.NewTOTP(secret, 10, 60, nil)
 		fmt.Println("Current OTP is", totp.Now())
 

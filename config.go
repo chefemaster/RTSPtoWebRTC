@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"github.com/deepch/vdk/codec/h264parser"
@@ -271,6 +272,11 @@ func (element *ConfigST) reload() error {
 		element.Streams[index] = stream
 	}
 	return nil
+}
+
+func (element *ConfigST) generateKey(userId string) string {
+	secret := element.Env.Get("HTTP_SECRET")
+	return base32.StdEncoding.EncodeToString([]byte(userId + secret))
 }
 
 func pseudoUUID() (uuid string) {
